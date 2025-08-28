@@ -22,23 +22,59 @@ var installCmd = &cobra.Command{
 	Short: "Install and configure cursor-sync",
 	Long: `Install cursor-sync and configure it to run automatically as a macOS LaunchAgent.
 
-BEFORE INSTALLATION:
-1. Copy config/sync.example.yaml to config/sync.yaml
-2. Edit config/sync.yaml and replace the repository URL with your private Git repository
+This command works with both setup and manual configurations:
+
+SETUP FLOW (Recommended):
+- If you ran 'cursor-sync setup', this command will use your existing ~/.cursor-sync/config.yaml
+- No additional configuration needed
+
+MANUAL FLOW:
+- Copy config/sync.example.yaml to config/sync.yaml
+- Edit config/sync.yaml and replace the repository URL with your private Git repository
 
 This command will:
-- Use your config/sync.yaml settings
+- Use your configuration (from setup or manual)
 - Create necessary configuration files
 - Set up macOS LaunchAgent for automatic startup
 - Perform initial sync from remote repository
 
-Example:
+Examples:
+  # After running cursor-sync setup
+  cursor-sync install
+
+  # Manual setup
   cp config/sync.example.yaml config/sync.yaml
   # Edit config/sync.yaml with your repository URL
   cursor-sync install`,
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
-		// Check if config/sync.yaml exists
+		// Check if user already has a configuration from setup
+		home, err := os.UserHomeDir()
+		if err != nil {
+			logger.Fatal("Failed to get home directory: %v", err)
+		}
+
+		userConfigPath := filepath.Join(home, ".cursor-sync", "config.yaml")
+		if _, err := os.Stat(userConfigPath); err == nil {
+			// User has configuration from setup, use that
+			logger.Info("Found existing configuration from setup: %s", userConfigPath)
+			logger.Info("Installing cursor-sync using existing configuration")
+
+			installer := installer.New("", force) // Empty repo URL, will read from user config
+
+			if err := installer.Install(); err != nil {
+				logger.Fatal("Installation failed: %v", err)
+			}
+
+			fmt.Println("✅ Cursor Sync installed successfully!")
+			fmt.Println("📂 Configuration loaded from: ~/.cursor-sync/config.yaml")
+			fmt.Println("🚀 Daemon will start automatically on login")
+			fmt.Println("📋 Use 'cursor-sync status' to check daemon status")
+			fmt.Println("⏸️  Use 'cursor-sync pause' to temporarily stop syncing")
+			return
+		}
+
+		// Fallback: Check if config/sync.yaml exists (for manual setup)
 		wd, err := os.Getwd()
 		if err != nil {
 			logger.Fatal("Failed to get working directory: %v", err)

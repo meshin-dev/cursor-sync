@@ -58,9 +58,16 @@ func (i *Installer) Install() error {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	// Copy configuration from project config/sync.yaml
-	if err := i.copyProjectConfig(configDir); err != nil {
-		return fmt.Errorf("failed to copy configuration: %w", err)
+	// Check if user already has a configuration from setup
+	userConfigPath := filepath.Join(configDir, "config.yaml")
+	if _, err := os.Stat(userConfigPath); err == nil {
+		logger.Info("Found existing configuration from setup: %s", userConfigPath)
+		logger.Info("Using existing configuration - skipping copy from project config")
+	} else {
+		// Copy configuration from project config/sync.yaml (for manual setup)
+		if err := i.copyProjectConfig(configDir); err != nil {
+			return fmt.Errorf("failed to copy configuration: %w", err)
+		}
 	}
 
 	// Verify repository privacy before proceeding
