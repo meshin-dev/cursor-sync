@@ -67,18 +67,9 @@ func (d *Daemon) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to initialize syncer: %w", err)
 	}
 
-	// Perform initial sync on startup
-	logger.Info("Performing initial sync on daemon startup...")
-	if err := d.performInitialSync(); err != nil {
-		logger.Error("Initial sync failed: %v", err)
-		// Don't fail daemon startup, just log the error
-	} else {
-		logger.Info("Initial sync completed successfully")
-	}
-
 	// Start DUAL SYNC SYSTEM: Real-time (primary) + Periodic (fallback)
 
-	// PRIMARY: Start real-time file watcher (fsnotify)
+	// PRIMARY: Start real-time file watcher (fsnotify) FIRST
 	if d.watcher != nil {
 		logger.Info("🚀 Starting PRIMARY sync method: Real-time file watching (fsnotify)")
 		go func() {
@@ -91,6 +82,15 @@ func (d *Daemon) Start(ctx context.Context) error {
 		go d.handleFileChanges(ctx)
 	} else {
 		logger.Warn("⚠️  Real-time file watching disabled - relying on periodic sync only")
+	}
+
+	// Perform initial sync AFTER watcher is started (but watcher will be disabled during sync)
+	logger.Info("Performing initial sync on daemon startup...")
+	if err := d.performInitialSync(); err != nil {
+		logger.Error("Initial sync failed: %v", err)
+		// Don't fail daemon startup, just log the error
+	} else {
+		logger.Info("Initial sync completed successfully")
 	}
 
 	// FALLBACK: Start periodic sync timers
@@ -243,6 +243,13 @@ func (d *Daemon) performInitialSync() error {
 	}
 
 	logger.Info("🔄 Starting initial sync sequence...")
+
+	// CRITICAL: Disable file watcher during initial sync to prevent infinite loops
+	if d.watcher != nil {
+		d.watcher.Disable()
+		defer d.watcher.Enable()
+		logger.Debug("File watcher disabled for initial sync")
+	}
 
 	// Step 1: Pull from remote to get any changes that happened while daemon was off
 	logger.Info("📥 Step 1: Pulling remote changes...")
