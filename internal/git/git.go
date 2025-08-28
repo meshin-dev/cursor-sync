@@ -464,12 +464,26 @@ func (r *Repository) pullWithLocalStrategy() error {
 		return fmt.Errorf("failed to get worktree: %w", err)
 	}
 
-	// Reset to HEAD to clean up any merge state
+	// Try to reset to HEAD to clean up any merge state
 	if err := worktree.Reset(&git.ResetOptions{
 		Mode:   git.HardReset,
 		Commit: plumbing.ZeroHash, // Reset to HEAD
 	}); err != nil {
-		return fmt.Errorf("failed to reset worktree: %w", err)
+		// If reset fails due to missing files, try a more gentle approach
+		logger.Warn("Hard reset failed, trying soft reset: %v", err)
+
+		// Try soft reset instead
+		if err := worktree.Reset(&git.ResetOptions{
+			Mode:   git.SoftReset,
+			Commit: plumbing.ZeroHash, // Reset to HEAD
+		}); err != nil {
+			logger.Warn("Soft reset also failed: %v", err)
+
+			// If both resets fail, just clean up the index manually
+			if err := r.cleanupIndex(); err != nil {
+				return fmt.Errorf("failed to cleanup index: %w", err)
+			}
+		}
 	}
 
 	logger.Info("Successfully kept local changes")
@@ -501,10 +515,63 @@ func (r *Repository) pullWithRemoteStrategy() error {
 	})
 
 	if err != nil && err != git.NoErrAlreadyUpToDate {
-		return fmt.Errorf("failed to force pull remote changes: %w", err)
+		// If force pull fails, try to clean up and retry
+		logger.Warn("Force pull failed, trying to clean up and retry: %v", err)
+
+		// Clean up any problematic files first
+		if cleanupErr := r.cleanupIndex(); cleanupErr != nil {
+			logger.Warn("Failed to cleanup index: %v", cleanupErr)
+		}
+
+		// Try force pull again
+		err = worktree.Pull(&git.PullOptions{
+			RemoteName:    r.remoteName,
+			ReferenceName: plumbing.NewBranchReferenceName(r.branch),
+			Auth:          auth,
+			Force:         true,
+			Depth:         1,
+		})
+
+		if err != nil && err != git.NoErrAlreadyUpToDate {
+			return fmt.Errorf("failed to force pull remote changes after cleanup: %w", err)
+		}
 	}
 
 	logger.Info("Successfully accepted remote changes")
+	return nil
+}
+
+// cleanupIndex manually cleans up the Git index when reset operations fail
+func (r *Repository) cleanupIndex() error {
+	logger.Info("Manually cleaning up Git index...")
+
+	worktree, err := r.repo.Worktree()
+	if err != nil {
+		return fmt.Errorf("failed to get worktree: %w", err)
+	}
+
+	// Get the current status to see what needs to be cleaned up
+	status, err := worktree.Status()
+	if err != nil {
+		return fmt.Errorf("failed to get status: %w", err)
+	}
+
+	// Remove any conflicted or staged files from the index
+	for file, stat := range status {
+		if stat.Staging == git.UpdatedButUnmerged ||
+			stat.Staging == git.Added ||
+			stat.Staging == git.Modified {
+
+			// Try to remove from staging area
+			_, err := worktree.Remove(file)
+			if err != nil {
+				logger.Debug("Failed to remove %s from index: %v", file, err)
+				// Continue with other files
+			}
+		}
+	}
+
+	logger.Info("Index cleanup completed")
 	return nil
 }
 
