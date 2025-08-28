@@ -82,7 +82,7 @@ func (r *Repository) Clone(remoteURL string) error {
 		Auth:          auth,
 		ReferenceName: plumbing.NewBranchReferenceName(r.branch),
 		SingleBranch:  true,
-		Depth:         1,
+		// Depth:         1, // Remove shallow clone for better Git operations
 	})
 
 	if err != nil {
@@ -267,7 +267,7 @@ func (r *Repository) retryCloneWithBackoff(remoteURL string, auth *http.BasicAut
 			Auth:          auth,
 			ReferenceName: plumbing.NewBranchReferenceName(r.branch),
 			SingleBranch:  true,
-			Depth:         1,
+			// Depth:         1, // Remove shallow clone for better Git operations
 		})
 
 		if err == nil {
@@ -368,7 +368,8 @@ func (r *Repository) Pull() error {
 		RemoteName:    r.remoteName,
 		ReferenceName: plumbing.NewBranchReferenceName(r.branch),
 		Auth:          auth,
-		Depth:         1, // Shallow pull - only fetch latest commit
+		// Remove shallow clone to fix merge conflicts and history issues
+		// Depth:         1, // Shallow pull - only fetch latest commit
 	})
 
 	if err == git.NoErrAlreadyUpToDate {
@@ -431,7 +432,7 @@ func (r *Repository) PullWithConflictResolution(strategy string) error {
 	}
 }
 
-// pullWithNewerStrategy resolves conflicts by comparing timestamps
+// pullWithNewerStrategy resolves conflicts by comparing timestamps with deterministic fallback
 func (r *Repository) pullWithNewerStrategy() error {
 	localTime, err := r.GetLastCommitTime()
 	if err != nil {
@@ -445,11 +446,20 @@ func (r *Repository) pullWithNewerStrategy() error {
 		return r.pullWithLocalStrategy()
 	}
 
+	// Calculate time difference
+	timeDiff := localTime.Sub(remoteTime)
+
+	// If timestamps are very close (within 5 seconds), use deterministic fallback
+	if timeDiff.Abs() <= 5*time.Second {
+		logger.Info("Timestamps are very close (%v), using deterministic remote strategy", timeDiff)
+		return r.pullWithRemoteStrategy() // Always prefer remote for consistency
+	}
+
 	if localTime.After(remoteTime) {
-		logger.Info("Local changes are newer, keeping local version")
+		logger.Info("Local changes are newer by %v, keeping local version", timeDiff)
 		return r.pullWithLocalStrategy()
 	} else {
-		logger.Info("Remote changes are newer, keeping remote version")
+		logger.Info("Remote changes are newer by %v, keeping remote version", -timeDiff)
 		return r.pullWithRemoteStrategy()
 	}
 }
@@ -511,7 +521,7 @@ func (r *Repository) pullWithRemoteStrategy() error {
 		ReferenceName: plumbing.NewBranchReferenceName(r.branch),
 		Auth:          auth,
 		Force:         true, // Force overwrite local changes
-		Depth:         1,    // Shallow pull
+		// Depth:         1, // Remove shallow clone for better Git operations    // Shallow pull
 	})
 
 	if err != nil && err != git.NoErrAlreadyUpToDate {
@@ -529,7 +539,7 @@ func (r *Repository) pullWithRemoteStrategy() error {
 			ReferenceName: plumbing.NewBranchReferenceName(r.branch),
 			Auth:          auth,
 			Force:         true,
-			Depth:         1,
+			// Depth:         1, // Remove shallow clone for better Git operations
 		})
 
 		if err != nil && err != git.NoErrAlreadyUpToDate {
@@ -810,7 +820,8 @@ func (r *Repository) resolveWithRemote() error {
 		ReferenceName: plumbing.NewBranchReferenceName(r.branch),
 		Auth:          auth,
 		Force:         true,
-		Depth:         1, // Shallow pull - only fetch latest commit
+		// Remove shallow clone to fix merge conflicts and history issues
+		// Depth:         1, // Shallow pull - only fetch latest commit
 	})
 
 	if err != nil && err != git.NoErrAlreadyUpToDate {
