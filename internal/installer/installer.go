@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"cursor-sync/internal/auth"
+	"cursor-sync/internal/config"
 	"cursor-sync/internal/logger"
 	"cursor-sync/internal/privacy"
 )
@@ -247,36 +248,15 @@ func (i *Installer) loadLaunchAgent(home string) error {
 
 // checkRepositoryPrivacy verifies the repository is private during installation
 func (i *Installer) checkRepositoryPrivacy() error {
-	// Read the config to get the repository URL
-	wd, err := os.Getwd()
+	// Load configuration using the same mechanism as the rest of the application
+	cfg, err := config.Load()
 	if err != nil {
-		return fmt.Errorf("failed to get working directory: %w", err)
+		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	configPath := filepath.Join(wd, "config", "sync.yaml")
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return fmt.Errorf("failed to read config file: %w", err)
-	}
-
-	// Extract repository URL from config (simple string parsing)
-	lines := strings.Split(string(data), "\n")
-	var repoURL string
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "url:") {
-			// Extract URL from: url: "https://github.com/..."
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				repoURL = strings.Trim(strings.TrimSpace(parts[1]), "\"'")
-			}
-			break
-		}
-	}
-
+	repoURL := cfg.Repository.URL
 	if repoURL == "" {
-		return fmt.Errorf("could not extract repository URL from config")
+		return fmt.Errorf("repository URL not found in configuration")
 	}
 
 	logger.Info("Verifying repository privacy for: %s", repoURL)
