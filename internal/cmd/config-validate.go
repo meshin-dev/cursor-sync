@@ -98,7 +98,8 @@ func validateConfigValues(cfg *config.Config) error {
 
 	// CRITICAL: Debounce time validation (minimum 10 seconds)
 	if cfg.Sync.DebounceTime < 10*time.Second {
-		return fmt.Errorf("debounce time must be at least 10 seconds (current: %v)", cfg.Sync.DebounceTime)
+		fmt.Printf("⚠️  Debounce time too low (%v), setting to minimum 10s\n", cfg.Sync.DebounceTime)
+		cfg.Sync.DebounceTime = 10 * time.Second
 	}
 
 	// Conflict resolution validation

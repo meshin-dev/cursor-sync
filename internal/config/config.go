@@ -11,6 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"cursor-sync/internal/cursor"
+	"cursor-sync/internal/logger"
 )
 
 // Config represents the application configuration
@@ -264,7 +265,8 @@ func validate(cfg *Config) error {
 	}
 
 	if cfg.Sync.DebounceTime < 10*time.Second {
-		return fmt.Errorf("debounce time must be at least 10 seconds (current: %v)", cfg.Sync.DebounceTime)
+		logger.Info("⚠️  Debounce time too low (%v), setting to minimum 10s", cfg.Sync.DebounceTime)
+		cfg.Sync.DebounceTime = 10 * time.Second
 	}
 
 	if cfg.Sync.ConflictResolve != "newer" && cfg.Sync.ConflictResolve != "local" && cfg.Sync.ConflictResolve != "remote" {

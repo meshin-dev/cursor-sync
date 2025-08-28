@@ -376,7 +376,26 @@ func (r *Repository) Pull() error {
 		return nil
 	}
 
+	// Handle specific Git errors more gracefully
 	if err != nil {
+		errStr := err.Error()
+
+		// Check for common conflict scenarios
+		if strings.Contains(errStr, "non-fast-forward") ||
+			strings.Contains(errStr, "rejected") ||
+			strings.Contains(errStr, "cannot lock ref") {
+			logger.Debug("Pull conflict detected: %v", err)
+			return fmt.Errorf("pull conflict: %w", err)
+		}
+
+		// Check for network or authentication issues
+		if strings.Contains(errStr, "authentication") ||
+			strings.Contains(errStr, "network") ||
+			strings.Contains(errStr, "timeout") {
+			logger.Debug("Network/authentication issue during pull: %v", err)
+			return fmt.Errorf("network/authentication error: %w", err)
+		}
+
 		return fmt.Errorf("failed to pull changes: %w", err)
 	}
 
@@ -408,7 +427,27 @@ func (r *Repository) Push() error {
 		return nil
 	}
 
+	// Handle specific Git errors more gracefully
 	if err != nil {
+		errStr := err.Error()
+
+		// Check for common conflict scenarios
+		if strings.Contains(errStr, "non-fast-forward") ||
+			strings.Contains(errStr, "rejected") ||
+			strings.Contains(errStr, "cannot lock ref") ||
+			strings.Contains(errStr, "object not found") {
+			logger.Debug("Push conflict detected: %v", err)
+			return fmt.Errorf("push conflict: %w", err)
+		}
+
+		// Check for network or authentication issues
+		if strings.Contains(errStr, "authentication") ||
+			strings.Contains(errStr, "network") ||
+			strings.Contains(errStr, "timeout") {
+			logger.Debug("Network/authentication issue during push: %v", err)
+			return fmt.Errorf("network/authentication error: %w", err)
+		}
+
 		return fmt.Errorf("failed to push changes: %w", err)
 	}
 
