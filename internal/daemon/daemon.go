@@ -5,21 +5,25 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"cursor-sync/internal/auth"
 	"cursor-sync/internal/config"
 	"cursor-sync/internal/logger"
-	"cursor-sync/internal/sync"
+	syncpkg "cursor-sync/internal/sync"
 	"cursor-sync/internal/watcher"
 )
 
 // Daemon represents the main sync daemon
 type Daemon struct {
-	config  *config.Config
-	syncer  *sync.Syncer
-	watcher *watcher.Watcher
-	paused  bool
+	config         *config.Config
+	syncer         *syncpkg.Syncer
+	watcher        *watcher.Watcher
+	paused         bool
+	syncMutex      sync.Mutex // Prevents concurrent syncs
+	lastSyncTime   time.Time  // Track when last sync occurred
+	syncInProgress bool       // Track if sync is currently in progress
 }
 
 // New creates a new daemon instance
@@ -36,7 +40,7 @@ func New(cfg *config.Config) (*Daemon, error) {
 	}
 
 	// Create syncer
-	syncer, err := sync.New(cfg)
+	syncer, err := syncpkg.New(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create syncer: %w", err)
 	}
@@ -51,10 +55,12 @@ func New(cfg *config.Config) (*Daemon, error) {
 	}
 
 	return &Daemon{
-		config:  cfg,
-		syncer:  syncer,
-		watcher: fileWatcher,
-		paused:  false,
+		config:         cfg,
+		syncer:         syncer,
+		watcher:        fileWatcher,
+		paused:         false,
+		lastSyncTime:   time.Time{}, // Initialize to zero time
+		syncInProgress: false,
 	}, nil
 }
 
@@ -118,20 +124,25 @@ func (d *Daemon) syncLoop(ctx context.Context, pullTicker, pushTicker *time.Tick
 	logger.Info("🕒 Periodic sync active (fallback method) - Pull: %v, Push: %v",
 		d.config.Sync.PullInterval, d.config.Sync.PushInterval)
 
+	// Use a single combined timer to prevent concurrent pull/push operations
+	minInterval := d.config.Sync.PullInterval
+	if d.config.Sync.PushInterval < minInterval {
+		minInterval = d.config.Sync.PushInterval
+	}
+
+	// Create a single timer for periodic comprehensive sync
+	periodicTicker := time.NewTicker(minInterval)
+	defer periodicTicker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			logger.Info("Periodic sync loop shutting down")
 			return
-		case <-pullTicker.C:
-			if !d.isPaused() {
-				logger.Debug("🔄 Periodic pull sync triggered")
-				d.performPull()
-			}
-		case <-pushTicker.C:
-			if !d.isPaused() {
-				logger.Debug("🔄 Periodic push sync triggered")
-				d.performPush()
+		case <-periodicTicker.C:
+			if !d.isPaused() && d.canStartSync() {
+				logger.Debug("🔄 Periodic comprehensive sync triggered")
+				d.performPeriodicSync()
 			}
 		}
 	}
@@ -163,7 +174,7 @@ func (d *Daemon) handleFileChanges(ctx context.Context) {
 				debounceTimer.Reset(debounceTime)
 			}
 		case <-debounceTimer.C:
-			if pendingChanges && !d.isPaused() {
+			if pendingChanges && !d.isPaused() && d.canStartSync() {
 				logger.Info("⚡ Real-time sync triggered after %v debounce period", debounceTime)
 
 				// Perform comprehensive sync (pull then push)
@@ -172,6 +183,74 @@ func (d *Daemon) handleFileChanges(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// canStartSync checks if a sync operation can be started
+func (d *Daemon) canStartSync() bool {
+	d.syncMutex.Lock()
+	defer d.syncMutex.Unlock()
+
+	// Don't start if sync is already in progress
+	if d.syncInProgress {
+		logger.Debug("Sync already in progress, skipping")
+		return false
+	}
+
+	// Enforce minimum sync interval of 30 seconds to prevent rapid syncing
+	minInterval := 30 * time.Second
+	if time.Since(d.lastSyncTime) < minInterval {
+		logger.Debug("Too soon since last sync (%v ago), skipping", time.Since(d.lastSyncTime))
+		return false
+	}
+
+	return true
+}
+
+// startSync marks sync as in progress and updates last sync time
+func (d *Daemon) startSync() {
+	d.syncMutex.Lock()
+	defer d.syncMutex.Unlock()
+	d.syncInProgress = true
+	d.lastSyncTime = time.Now()
+	logger.Debug("🔒 Sync started - locked")
+}
+
+// endSync marks sync as completed
+func (d *Daemon) endSync() {
+	d.syncMutex.Lock()
+	defer d.syncMutex.Unlock()
+	d.syncInProgress = false
+	logger.Debug("🔓 Sync completed - unlocked")
+}
+
+// performPeriodicSync performs a comprehensive periodic sync
+func (d *Daemon) performPeriodicSync() {
+	logger.Debug("📅 Performing periodic comprehensive sync...")
+
+	d.startSync()
+	defer d.endSync()
+
+	// Disable file watcher during sync to prevent infinite loops
+	if d.watcher != nil {
+		d.watcher.Disable()
+		defer d.watcher.Enable()
+	}
+
+	// Step 1: Pull from remote first
+	if err := d.syncer.SyncFromRemote(); err != nil {
+		logger.Error("Periodic pull sync failed: %v", err)
+	} else {
+		logger.Debug("✅ Periodic pull sync completed")
+	}
+
+	// Step 2: Push local changes
+	if err := d.syncer.SyncToRemote(); err != nil {
+		logger.Error("Periodic push sync failed: %v", err)
+	} else {
+		logger.Debug("✅ Periodic push sync completed")
+	}
+
+	logger.Debug("📅 Periodic comprehensive sync finished")
 }
 
 func (d *Daemon) performPull() {
@@ -211,6 +290,9 @@ func (d *Daemon) performPush() {
 func (d *Daemon) performRealtimeSync() {
 	logger.Info("⚡ Performing real-time sync sequence...")
 
+	d.startSync()
+	defer d.endSync()
+
 	// Disable file watcher during sync to prevent infinite loops
 	if d.watcher != nil {
 		d.watcher.Disable()
@@ -243,6 +325,9 @@ func (d *Daemon) performInitialSync() error {
 	}
 
 	logger.Info("🔄 Starting initial sync sequence...")
+
+	d.startSync()
+	defer d.endSync()
 
 	// CRITICAL: Disable file watcher during initial sync to prevent infinite loops
 	if d.watcher != nil {
