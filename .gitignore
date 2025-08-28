@@ -1,0 +1,48 @@
+# Build artifacts
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary
+cursor-sync
+
+# Output of the go coverage tool
+*.out
+
+# Logs
+logs/
+
+# Configuration files (contain sensitive data)
+config.yaml
+~/.cursor-sync/.github
+
+# Cursor settings (user data)
+cursor-settings/
+
+# User data directory
+.cursor-sync/
+
+# Config directories
+config/sync.yaml
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.temp

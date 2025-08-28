@@ -1,0 +1,74 @@
+repository:
+  # IMPORTANT: Replace this URL with your PRIVATE Git repository for syncing Cursor settings
+  # ⚠️  SECURITY NOTICE: This MUST be a private repository to protect your sensitive data
+  # 🔑 AUTHENTICATION: Requires GitHub Personal Access Token (set with: cursor-sync token <your-token>)
+  # 🚀 AUTO-CREATION: If the repository doesn't exist, cursor-sync will automatically create it as private
+  # 
+  # Cursor settings may contain:
+  # • API keys and access tokens
+  # • Personal workspace paths
+  # • Extension configurations
+  # • Custom snippets and templates
+  #
+  # BEFORE USING:
+  # 1. Create a GitHub Personal Access Token at: https://github.com/settings/tokens
+  # 2. Grant 'repo' scope (Full control of private repositories)
+  # 3. Save token with: cursor-sync token ghp_your_token_here
+  # 4. Replace the URL below with your desired repository (will be created if it doesn't exist)
+  #
+  # Examples:
+  # - Private GitHub repo: https://github.com/yourusername/cursor-settings.git  
+  # - SSH format also works: git@github.com:yourusername/cursor-settings.git
+  # - Organization repo: https://github.com/yourorg/cursor-settings.git
+  url: ""
+  local_path: "~/.cursor-sync/settings"
+  branch: "main"
+
+sync:
+  # How often to check for remote changes (pull)
+  pull_interval: "5m"
+  # How often to push local changes to remote
+  push_interval: "5m"
+  # Debounce time for real-time file changes (minimum: 10s)
+  # This prevents excessive syncs during rapid file changes
+  debounce_time: "10s"
+  # Enable real-time file watching for immediate sync
+  watch_enabled: true
+  # Conflict resolution strategy: "newer" (prefer recent commits), "local", or "remote"
+  conflict_resolve: "newer"
+  # Hash calculation throttling settings
+  hash_throttle_delay: "100ms"  # Delay between hash calculations to prevent CPU stress
+  hash_polling_timeout: "10s"   # Maximum time to wait for hash calculation with polling
+  # Auto-retry settings for repository creation (max 10s delay with exponential backoff)
+  # Used when automatically creating repositories that don't exist
+
+cursor:
+  # Path to Cursor configuration directory
+  # NOTE: cursor-sync will validate that Cursor is installed and this directory exists
+  # Default paths by OS:
+  #   macOS: ~/Library/Application Support/Cursor
+  #   Linux: ~/.config/Cursor  
+  #   Windows: %APPDATA%/Cursor
+  config_path: "~/Library/Application Support/Cursor"
+  
+  # Paths to exclude from syncing (relative to cursor config_path)
+  # Only sync User folder, exclude specific subdirectories within User
+  exclude_paths:
+    # Exclude specific User subdirectories that are not needed
+    - "User/workspaceStorage/"
+    - "User/History/"
+    - "User/globalStorage/"
+    - "**/node_modules/"
+    - "**/node_modules"
+
+logging:
+  # Log level: "debug", "info", "warn", "error"
+  level: "info"
+  # Directory for log files (organized by date)
+  log_dir: "~/.cursor-sync/logs"
+  # Maximum size of individual log files in MB
+  max_size: 10
+  # Number of days to keep log files
+  max_days: 30
+  # Compress old log files
+  compress: true
