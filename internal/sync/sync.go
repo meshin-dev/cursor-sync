@@ -248,22 +248,10 @@ func (s *Syncer) SyncFromRemote() error {
 		return fmt.Errorf("repository privacy check failed: %w", err)
 	}
 
-	// Try to pull changes from remote with robust error handling
+	// Try to pull changes from remote with robust conflict resolution
 	pullSuccess := false
-	if err := s.repo.Pull(); err != nil {
-		logger.Warn("Initial pull failed: %v", err)
-
-		// Try to resolve conflicts and pull again
-		if resolveErr := s.repo.ResolveConflicts(s.config.Sync.ConflictResolve); resolveErr != nil {
-			logger.Warn("Failed to resolve conflicts: %v", resolveErr)
-		} else {
-			// Try pull again after conflict resolution
-			if retryErr := s.repo.Pull(); retryErr != nil {
-				logger.Warn("Pull failed after conflict resolution: %v", retryErr)
-			} else {
-				pullSuccess = true
-			}
-		}
+	if err := s.repo.PullWithConflictResolution(s.config.Sync.ConflictResolve); err != nil {
+		logger.Warn("Pull with conflict resolution failed: %v", err)
 	} else {
 		pullSuccess = true
 	}

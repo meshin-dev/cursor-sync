@@ -403,6 +403,111 @@ func (r *Repository) Pull() error {
 	return nil
 }
 
+// PullWithConflictResolution performs a pull with robust conflict resolution
+func (r *Repository) PullWithConflictResolution(strategy string) error {
+	if r.repo == nil {
+		return fmt.Errorf("repository not initialized")
+	}
+
+	logger.Debug("Pulling changes from remote with conflict resolution")
+
+	// First, try normal pull
+	if err := r.Pull(); err == nil {
+		return nil // Success
+	}
+
+	// If normal pull failed, try conflict resolution based on strategy
+	logger.Info("Normal pull failed, attempting conflict resolution with strategy: %s", strategy)
+
+	switch strategy {
+	case "newer":
+		return r.pullWithNewerStrategy()
+	case "local":
+		return r.pullWithLocalStrategy()
+	case "remote":
+		return r.pullWithRemoteStrategy()
+	default:
+		return fmt.Errorf("unknown conflict resolution strategy: %s", strategy)
+	}
+}
+
+// pullWithNewerStrategy resolves conflicts by comparing timestamps
+func (r *Repository) pullWithNewerStrategy() error {
+	localTime, err := r.GetLastCommitTime()
+	if err != nil {
+		logger.Warn("Failed to get local commit time, using remote strategy: %v", err)
+		return r.pullWithRemoteStrategy()
+	}
+
+	remoteTime, err := r.GetRemoteLastCommitTime()
+	if err != nil {
+		logger.Warn("Failed to get remote commit time, using local strategy: %v", err)
+		return r.pullWithLocalStrategy()
+	}
+
+	if localTime.After(remoteTime) {
+		logger.Info("Local changes are newer, keeping local version")
+		return r.pullWithLocalStrategy()
+	} else {
+		logger.Info("Remote changes are newer, keeping remote version")
+		return r.pullWithRemoteStrategy()
+	}
+}
+
+// pullWithLocalStrategy keeps local changes and discards remote conflicts
+func (r *Repository) pullWithLocalStrategy() error {
+	logger.Info("Using local strategy - keeping local changes")
+
+	// Reset to local HEAD to discard any partial merge state
+	worktree, err := r.repo.Worktree()
+	if err != nil {
+		return fmt.Errorf("failed to get worktree: %w", err)
+	}
+
+	// Reset to HEAD to clean up any merge state
+	if err := worktree.Reset(&git.ResetOptions{
+		Mode:   git.HardReset,
+		Commit: plumbing.ZeroHash, // Reset to HEAD
+	}); err != nil {
+		return fmt.Errorf("failed to reset worktree: %w", err)
+	}
+
+	logger.Info("Successfully kept local changes")
+	return nil
+}
+
+// pullWithRemoteStrategy discards local changes and accepts remote
+func (r *Repository) pullWithRemoteStrategy() error {
+	logger.Info("Using remote strategy - accepting remote changes")
+
+	worktree, err := r.repo.Worktree()
+	if err != nil {
+		return fmt.Errorf("failed to get worktree: %w", err)
+	}
+
+	// Use token authentication
+	auth := &http.BasicAuth{
+		Username: "token",
+		Password: r.auth.GetToken(),
+	}
+
+	// Force pull to overwrite local changes
+	err = worktree.Pull(&git.PullOptions{
+		RemoteName:    r.remoteName,
+		ReferenceName: plumbing.NewBranchReferenceName(r.branch),
+		Auth:          auth,
+		Force:         true, // Force overwrite local changes
+		Depth:         1,    // Shallow pull
+	})
+
+	if err != nil && err != git.NoErrAlreadyUpToDate {
+		return fmt.Errorf("failed to force pull remote changes: %w", err)
+	}
+
+	logger.Info("Successfully accepted remote changes")
+	return nil
+}
+
 // Push pushes changes to the remote repository using GitHub token
 func (r *Repository) Push() error {
 	if r.repo == nil {
